@@ -40,6 +40,10 @@ import {
 } from "./bot/helpers.js";
 import type { TelegramContext } from "./bot/types.js";
 import { isTelegramForumServiceMessage } from "./forum-service-message.js";
+import {
+  shouldOverrideRequireMention,
+  type GroupMessageContext,
+} from "./group-response-decider.js";
 
 export type TelegramInboundBodyResult = {
   bodyText: string;
@@ -240,11 +244,41 @@ export async function resolveTelegramInboundBody(params: {
     replyToBotMessage && isTelegramForumServiceMessage(msg.reply_to_message);
   const implicitMention = replyToBotMessage && !isReplyToServiceMessage;
   const canDetectMention = Boolean(botUsername) || mentionRegexes.length > 0;
+
+  // Intelligent trigger: check if we should override requireMention for target group
+  let shouldUseIntelligentTrigger = false;
+  let effectiveRequireMention = Boolean(requireMention);
+
+  if (isGroup && requireMention && !wasMentioned && !implicitMention) {
+    const groupContext: GroupMessageContext = {
+      chatId,
+      senderId,
+      senderUsername,
+      messageText: messageTextParts.text,
+      messageTimestamp: msg.date ? msg.date * 1000 : undefined,
+      recentHistory: groupHistories.get(historyKey ?? "") ?? [],
+      botUsername,
+    };
+
+    shouldUseIntelligentTrigger = shouldOverrideRequireMention({
+      chatId,
+      isGroup,
+      requireMention,
+      groupContext,
+      cfg,
+    });
+
+    // If intelligent trigger passes, treat as if mentioned
+    if (shouldUseIntelligentTrigger) {
+      effectiveRequireMention = false;
+    }
+  }
+
   const mentionGate = resolveMentionGatingWithBypass({
     isGroup,
-    requireMention: Boolean(requireMention),
+    requireMention: effectiveRequireMention,
     canDetectMention,
-    wasMentioned,
+    wasMentioned: wasMentioned || shouldUseIntelligentTrigger,
     implicitMention: isGroup && Boolean(requireMention) && implicitMention,
     hasAnyMention,
     allowTextCommands: true,
@@ -252,7 +286,7 @@ export async function resolveTelegramInboundBody(params: {
     commandAuthorized,
   });
   const effectiveWasMentioned = mentionGate.effectiveWasMentioned;
-  if (isGroup && requireMention && canDetectMention && mentionGate.shouldSkip) {
+  if (isGroup && effectiveRequireMention && canDetectMention && mentionGate.shouldSkip) {
     logger.info({ chatId, reason: "no-mention" }, "skipping group message");
     recordPendingHistoryEntryIfEnabled({
       historyMap: groupHistories,

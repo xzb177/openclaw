@@ -18,6 +18,10 @@ import {
 import { logVerbose } from "../../globals.js";
 import { clearCommandLane, getQueueSize } from "../../process/command-queue.js";
 import { normalizeMainKey } from "../../routing/session-key.js";
+import {
+  TARGET_GROUP_ID,
+  buildGroupAutoResponseContext,
+} from "../../telegram/group-response-decider.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
 import { hasControlCommand } from "../command-detection.js";
 import { buildInboundMediaNote } from "../media-note.js";
@@ -267,10 +271,18 @@ export async function runPreparedReply(
   const inboundMetaPrompt = buildInboundMetaSystemPrompt(
     isNewSession ? sessionCtx : { ...sessionCtx, ThreadStarterBody: undefined },
   );
+
+  // Inject group auto-response context for target group (云海交流群)
+  let groupAutoResponseContext = "";
+  if (isGroupChat && sessionCtx.From?.includes(TARGET_GROUP_ID)) {
+    groupAutoResponseContext = buildGroupAutoResponseContext();
+  }
+
   const extraSystemPromptParts = [
     inboundMetaPrompt,
     groupChatContext,
     groupIntro,
+    groupAutoResponseContext,
     groupSystemPrompt,
   ].filter(Boolean);
   const baseBody = sessionCtx.BodyStripped ?? sessionCtx.Body ?? "";
