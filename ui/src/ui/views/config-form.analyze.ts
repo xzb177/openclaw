@@ -119,29 +119,29 @@ function normalizeSchemaNode(
   };
 }
 
-function isSecretRefVariant(entry: JsonSchema): boolean {
-  if (schemaType(entry) !== "object") {
-    return false;
-  }
-  const source = entry.properties?.source;
-  const provider = entry.properties?.provider;
-  const id = entry.properties?.id;
-  if (!source || !provider || !id) {
-    return false;
-  }
-  return (
-    typeof source.const === "string" &&
-    schemaType(provider) === "string" &&
-    schemaType(id) === "string"
-  );
-}
-
 function isSecretRefUnion(entry: JsonSchema): boolean {
   const variants = entry.oneOf ?? entry.anyOf;
   if (!variants || variants.length === 0) {
     return false;
   }
-  return variants.every((variant) => isSecretRefVariant(variant));
+  // Check if all variants are secret ref schemas (object with source/provider/id)
+  return variants.every((variant) => {
+    if (schemaType(variant) !== "object") {
+      return false;
+    }
+    const props = variant.properties;
+    if (!props) {
+      return false;
+    }
+    const hasSource =
+      props.source &&
+      (typeof props.source.const === "string" ||
+        (Array.isArray(props.source.enum) &&
+          props.source.enum.every((v: unknown) => typeof v === "string")));
+    const hasProvider = props.provider && schemaType(props.provider) === "string";
+    const hasId = props.id && schemaType(props.id) === "string";
+    return hasSource && hasProvider && hasId;
+  });
 }
 
 function normalizeSecretInputUnion(
